@@ -301,12 +301,22 @@ h1 {
 .cal-head h2 { margin: 0; font-size: 1.15rem; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: .75rem; color: var(--muted); }
 .legend span { display: flex; align-items: center; gap: 5px; }
-.dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.legend .legend-break { padding-left: 12px; border-left: 1px solid var(--border); }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.dot.live { background: var(--muted); }
 .dot.type-reel { background: var(--reel); }
 .dot.type-story { background: var(--story); }
 .dot.type-post { background: var(--post); }
 .dot.type-carousel { background: var(--carousel); }
-.dot.outline { border: 2px dashed var(--muted); }
+/* Draft due = diamond (go-live = round dot) */
+.dot.outline {
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+  background: var(--muted);
+  transform: rotate(45deg);
+  margin: 0 1px;
+}
 
 .cal {
   display: grid;
@@ -356,6 +366,7 @@ h1 {
 .cal-pill.type-post { background: var(--post); }
 .cal-pill.type-carousel { background: var(--carousel); }
 .cal-pill.outline { background: transparent; border: 1.5px dashed currentColor; }
+.cal-pill.outline::before { content: '◆ '; font-size: .9em; }
 .cal-pill.outline.type-reel { color: var(--reel); }
 .cal-pill.outline.type-story { color: var(--story); }
 .cal-pill.outline.type-post { color: var(--post); }
@@ -366,8 +377,19 @@ h1 {
   .cal { padding: 5px; gap: 3px; }
   .cal-cell { min-height: 54px; padding: 3px; align-items: center; }
   .cal-events { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 2px; }
-  .cal-pill { width: 7px; height: 7px; padding: 0; border-radius: 50%; font-size: 0; }
-  .cal-pill.outline { border-width: 1.5px; }
+  .cal-pill { width: 7px; height: 7px; padding: 0; border-radius: 50%; font-size: 0; flex-shrink: 0; }
+  /* Draft due on phones: a solid diamond in the content type's colour */
+  .cal-pill.outline {
+    width: 7px;
+    height: 7px;
+    border: 0;
+    border-radius: 1.5px;
+    background: currentColor;
+    transform: rotate(45deg);
+    margin: 0 1px;
+  }
+  .cal-pill.outline::before { content: none; }
+  .cal-events { gap: 3px; }
   .cal-more { display: none; }
 }
 
@@ -465,24 +487,45 @@ h1 {
   z-index: 50;
   animation: fade .15s ease;
 }
+.overlay { height: 100vh; height: 100dvh; }
 .sheet {
   background: var(--surface);
   width: 100%;
   max-width: 560px;
+  /* dvh = the part of the screen actually visible between the browser's
+     own bars, so the top of the form never slides under the address bar */
   max-height: 92vh;
+  max-height: calc(100dvh - 16px - env(safe-area-inset-top));
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   border-radius: 24px 24px 0 0;
-  padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
+  padding: 0 18px calc(18px + env(safe-area-inset-bottom));
   animation: up .2s ease;
 }
 @media (min-width: 700px) {
   .overlay { align-items: center; }
   .sheet { border-radius: 24px; }
 }
-.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.sheet-head h2 { margin: 0; font-size: 1.15rem; }
+/* Title and ✕ stay pinned at the top of the form while it scrolls */
+.sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.sheet-head h2 { margin: 0; font-size: 1.15rem; min-width: 0; }
+.sheet-head .icon-btn { flex-shrink: 0; }
 
-.form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-top: 8px; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field > span { font-size: .76rem; font-weight: 700; color: var(--muted); }
 .field.check { flex-direction: row; align-items: center; gap: 8px; padding-top: 18px; }
@@ -492,6 +535,8 @@ h1 {
 
 .input {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1.5px solid var(--border);
   background: var(--surface-2);
   color: var(--text);
@@ -503,7 +548,32 @@ h1 {
 .input:focus { outline: none; border-color: var(--pink); background: var(--surface); }
 textarea.input { resize: vertical; }
 
-.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+/* Phone browsers give date fields a fixed minimum width that pushes the
+   form sideways. Resetting their appearance lets them shrink to the column. */
+input.input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  min-height: 46px;
+  line-height: 1.2;
+  text-align: left;
+}
+input.input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+input.input[type="date"]::-webkit-calendar-picker-indicator { margin-left: 4px; }
+select.input { min-width: 0; text-overflow: ellipsis; }
+
+.warn {
+  margin: -2px 0 0;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--orange);
+  background: var(--story-bg);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.warn.error { color: var(--red); background: var(--reel-bg); }
+
+.seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .seg-btn {
   border: 1.5px solid var(--border);
   background: var(--surface-2);
@@ -523,9 +593,27 @@ textarea.input { resize: vertical; }
 .status-line { margin: 0; font-size: .88rem; font-weight: 600; }
 
 @media (max-width: 420px) {
-  .form { grid-template-columns: 1fr; }
+  .form { grid-template-columns: minmax(0, 1fr); }
   .field.check { padding-top: 0; }
+  .seg-btn { font-size: .78rem; padding: 10px 2px; }
 }
+
+/* Recovery screen shown if the app ever hits an unexpected error */
+.crash {
+  max-width: 420px;
+  margin: 18vh auto 0;
+  padding: 0 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.crash img { border-radius: 12px; }
+.crash h2 { margin: 0; font-size: 1.2rem; }
+.crash p { margin: 0; color: var(--muted); }
+.crash details { margin-top: 16px; font-size: .78rem; color: var(--muted); }
+.crash code { display: block; margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---------- Toast ---------- */
 .toast {

@@ -12,6 +12,9 @@ const HEADERS = [
   'status', 'amount', 'payment', 'collab', 'link', 'notes', 'updatedAt',
 ];
 const DATE_COLS = ['draftDue', 'goLive'];
+// Every column except amount and updatedAt is stored as plain text, so Sheets
+// never turns phone numbers, notes or brand names into numbers, dates or formulas.
+const TEXT_COLS = HEADERS.filter((h) => h !== 'amount' && h !== 'updatedAt');
 
 /** Run this once from the Apps Script editor. */
 function setup() {
@@ -21,8 +24,8 @@ function setup() {
     .setFontWeight('bold')
     .setBackground('#fce4ec');
   sh.setFrozenRows(1);
-  // Keep dates as plain YYYY-MM-DD text so they never shift time zones.
-  DATE_COLS.forEach((c) => {
+  // Keep text columns (including dates) as plain text.
+  TEXT_COLS.forEach((c) => {
     const col = HEADERS.indexOf(c) + 1;
     sh.getRange(1, col, sh.getMaxRows(), 1).setNumberFormat('@');
   });
@@ -51,7 +54,9 @@ function doPost(e) {
   if (!pass || req.passcode !== pass) return json_({ ok: false, error: 'Wrong passcode' });
 
   const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  if (!lock.tryLock(20000)) {
+    return json_({ ok: false, busy: true, error: 'The sheet is busy. Please try again in a moment.' });
+  }
   try {
     const sh = getSheet_();
     switch (req.action) {
@@ -97,15 +102,23 @@ function readAll_(sh) {
   return items;
 }
 
+function isDate_(v) {
+  return Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime());
+}
+
 function rowToItem_(row) {
-  const tz = Session.getScriptTimeZone();
+  // Use the sheet's own time zone (File → Settings), not the script's,
+  // so dates never shift by a day.
+  const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
   const item = {};
   HEADERS.forEach((h, i) => {
     let v = row[i];
-    if (v instanceof Date) v = Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+    if (isDate_(v)) v = Utilities.formatDate(v, tz, h === 'updatedAt' ? "yyyy-MM-dd'T'HH:mm:ss" : 'yyyy-MM-dd');
+    if (v === null || v === undefined) v = '';
     if (h === 'collab') v = v === true || String(v).toLowerCase() === 'true' || String(v).toLowerCase() === 'yes';
-    if (h === 'amount') v = v === '' ? '' : Number(v) || 0;
-    item[h] = v === null || v === undefined ? '' : v;
+    else if (h === 'amount') v = v === '' ? '' : Number(v) || 0;
+    else v = String(v); // always send text, even if an older row holds a number
+    item[h] = v;
   });
   item.id = String(item.id);
   return item;
@@ -117,7 +130,10 @@ function itemToRow_(item) {
     if (h === 'collab') return item.collab ? 'Yes' : 'No';
     if (h === 'amount') return item.amount === '' || item.amount == null ? '' : Number(item.amount) || 0;
     const v = item[h];
-    return v === undefined || v === null ? '' : String(v);
+    const s = v === undefined || v === null ? '' : String(v);
+    // A leading apostrophe makes Sheets store "=…" as text, not a formula.
+    // Sheets hides the apostrophe and never returns it.
+    return s.charAt(0) === '=' ? "'" + s : s;
   });
 }
 
@@ -134,12 +150,12 @@ function findRow_(sh, id) {
 function save_(sh, item) {
   if (!item.id) item.id = Utilities.getUuid().slice(0, 12);
   const row = itemToRow_(item);
-  const r = findRow_(sh, item.id);
-  if (r > 0) {
-    sh.getRange(r, 1, 1, HEADERS.length).setValues([row]);
-  } else {
-    sh.appendRow(row);
-  }
+  let r = findRow_(sh, item.id);
+  if (r < 0) r = sh.getLastRow() + 1;
+  const range = sh.getRange(r, 1, 1, HEADERS.length);
+  // Keep text cells as plain text so Sheets never converts them.
+  TEXT_COLS.forEach((c) => range.getCell(1, HEADERS.indexOf(c) + 1).setNumberFormat('@'));
+  range.setValues([row]);
   return item;
 }
 

@@ -32,19 +32,52 @@ export const isDemo = () => !getSettings().url;
 // doesn't send a CORS preflight, which Apps Script can't answer.
 async function call(action, payload = {}, override) {
   const { url, passcode } = override || getSettings();
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, passcode, ...payload }),
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, passcode, ...payload }),
+    });
+  } catch {
+    throw new Error('No internet connection. Check your network and try again.');
+  }
   let data;
   try {
     data = await res.json();
   } catch {
     throw new Error('The Apps Script URL did not return data. Check it is the /exec web app URL.');
   }
-  if (!data.ok) throw new Error(data.error || 'Request failed');
+  if (!data.ok) {
+    const err = new Error(data.error || 'Request failed');
+    err.busy = !!data.busy;
+    throw err;
+  }
   return data;
+}
+
+// Saves and deletes go out one at a time, in the order she made them,
+// so a quick double tap can never land in the sheet out of order.
+let queue = Promise.resolve();
+let pending = 0;
+export const hasPendingWrites = () => pending > 0;
+
+function enqueue(fn) {
+  pending++;
+  const run = queue.then(async () => {
+    try {
+      return await fn();
+    } catch (e) {
+      // The sheet was busy: wait a moment and try once more.
+      if (e.busy) {
+        await new Promise((r) => setTimeout(r, 1500));
+        return fn();
+      }
+      throw e;
+    }
+  });
+  queue = run.catch(() => {}).finally(() => pending--);
+  return run;
 }
 
 // ---------- Demo storage ----------
@@ -96,7 +129,7 @@ export async function saveItem(item) {
     demoWrite(items);
     return item;
   }
-  const data = await call('save', { item });
+  const data = await enqueue(() => call('save', { item }));
   return data.item;
 }
 
@@ -105,7 +138,7 @@ export async function deleteItem(id) {
     demoWrite(demoRead().filter((x) => x.id !== id));
     return;
   }
-  await call('delete', { id });
+  await enqueue(() => call('delete', { id }));
 }
 
 export async function testConnection(url, passcode) {

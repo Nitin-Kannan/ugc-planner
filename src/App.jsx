@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from './api';
 import {
   TYPES, STATUSES, PAYMENTS, todayStr, addDays, parse, toStr, fmtDate, relDay,
@@ -11,6 +11,9 @@ const TABS = [
   { id: 'all', label: 'All', icon: '📋' },
   { id: 'money', label: 'Payments', icon: '💸' },
 ];
+
+// On phones, don't pop the keyboard open the moment the form appears.
+const isTouch = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
 
 const typeClass = (t) => 'type-' + String(t || 'Reel').toLowerCase();
 const statusClass = (s) => 'st-' + String(s || '').toLowerCase().replace(/\s+/g, '-');
@@ -25,21 +28,57 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [demo, setDemo] = useState(api.isDemo());
 
-  async function load() {
-    setLoading(true);
-    setError('');
+  const lastLoad = useRef(0);
+  const editingRef = useRef(null);
+  editingRef.current = editing;
+
+  // silent = refresh in the background without the loading screen
+  async function load(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
     try {
-      setItems(await api.listItems());
+      const list = await api.listItems();
+      // Don't overwrite the screen while a save is still on its way to the sheet.
+      if (silent && api.hasPendingWrites()) return;
+      setItems(list);
+      setError('');
+      lastLoad.current = Date.now();
     } catch (e) {
-      setError(e.message);
+      if (!silent) setError(e.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
   useEffect(() => {
     load();
+    // Fetch the latest from the sheet whenever she comes back to the app
+    // (switching apps, unlocking the phone, another tab). This keeps two
+    // devices in step and moves "Today" on after midnight.
+    const onReturn = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (editingRef.current) return; // never refresh under an open form
+      if (Date.now() - lastLoad.current < 15000) return;
+      load(true);
+    };
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('focus', onReturn);
+    return () => {
+      document.removeEventListener('visibilitychange', onReturn);
+      window.removeEventListener('focus', onReturn);
+    };
   }, []);
+
+  // Stop the page behind a form from scrolling while the form is open.
+  useEffect(() => {
+    const open = !!editing || showSettings;
+    document.body.style.overflow = open ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [editing, showSettings]);
 
   useEffect(() => {
     if (!toast) return;
@@ -47,36 +86,43 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  const upsert = (list, it) => {
+    const i = list.findIndex((x) => x.id === it.id);
+    if (i < 0) return [...list, it];
+    const copy = [...list];
+    copy[i] = it;
+    return copy;
+  };
+
   // Optimistic save: update the screen first, then the sheet.
+  // Returns true if the sheet saved it. On failure only this one item is
+  // put back, so other changes made in the meantime are kept.
   async function save(item, msg = 'Saved') {
-    const prev = items;
     const it = { ...item, id: item.id || newId() };
-    setItems((list) => {
-      const i = list.findIndex((x) => x.id === it.id);
-      if (i < 0) return [...list, it];
-      const copy = [...list];
-      copy[i] = it;
-      return copy;
-    });
+    const before = items.find((x) => x.id === it.id);
+    setItems((list) => upsert(list, it));
     try {
       await api.saveItem(it);
       setToast(msg);
+      return true;
     } catch (e) {
-      setItems(prev);
-      setToast('Could not save: ' + e.message);
+      setItems((list) => (before ? upsert(list, before) : list.filter((x) => x.id !== it.id)));
+      setToast('Not saved. ' + e.message);
+      return false;
     }
-    return it;
   }
 
   async function remove(id) {
-    const prev = items;
+    const before = items.find((x) => x.id === id);
     setItems((list) => list.filter((x) => x.id !== id));
     try {
       await api.deleteItem(id);
       setToast('Deleted');
+      return true;
     } catch (e) {
-      setItems(prev);
-      setToast('Could not delete: ' + e.message);
+      if (before) setItems((list) => upsert(list, before));
+      setToast('Not deleted. ' + e.message);
+      return false;
     }
   }
 
@@ -95,7 +141,7 @@ export default function App() {
           </div>
         </div>
         <div className="top-actions">
-          <button className="icon-btn" onClick={load} title="Refresh" aria-label="Refresh">↻</button>
+          <button className="icon-btn" onClick={() => load()} title="Refresh" aria-label="Refresh">↻</button>
           <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings">⚙︎</button>
         </div>
       </header>
@@ -125,7 +171,7 @@ export default function App() {
         {!loading && error && (
           <div className="state error">
             <p>{error}</p>
-            <button className="btn" onClick={load}>Try again</button>
+            <button className="btn" onClick={() => load()}>Try again</button>
           </div>
         )}
         {!loading && !error && (
@@ -147,15 +193,16 @@ export default function App() {
           item={editing}
           onClose={() => setEditing(null)}
           onSave={async (it, again) => {
-            await save(it, it.id ? 'Updated' : 'Added');
+            const ok = await save(it, it.id ? 'Updated' : 'Added');
+            if (!ok) return false; // keep the form open with what she typed
             if (again) {
               // Same brand, next deliverable (e.g. 1 Reel + 3 Stories)
               setEditing({ ...emptyItem(), brand: it.brand, contact: it.contact, goLive: it.goLive });
             } else setEditing(null);
+            return true;
           }}
           onDelete={async (id) => {
-            await remove(id);
-            setEditing(null);
+            if (await remove(id)) setEditing(null);
           }}
         />
       )}
@@ -337,6 +384,7 @@ function CalendarView({ items, onOpen }) {
         <span><i className="dot type-story" />Story</span>
         <span><i className="dot type-post" />Post</span>
         <span><i className="dot type-carousel" />Carousel</span>
+        <span className="legend-break"><i className="dot live" />Goes live</span>
         <span><i className="dot outline" />Draft due</span>
       </div>
 
@@ -558,19 +606,36 @@ function PayRow({ it, onOpen, next, onSave }) {
 function ItemForm({ item, onClose, onSave, onDelete }) {
   const [f, setF] = useState(item);
   const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
   const isNew = !item.id;
+  const brand = String(f.brand ?? '');
+  const dirty = JSON.stringify(f) !== JSON.stringify(item);
+  const datesBackwards = f.draftDue && f.goLive && f.goLive < f.draftDue;
   const set = (k) => (e) =>
     setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
 
+  // "Save + add another" hands in a fresh item: reset the form to it.
+  useEffect(() => {
+    setF(item);
+    setFailed(false);
+  }, [item]);
+
   async function submit(again) {
-    if (!f.brand.trim()) return;
+    if (!brand.trim() || saving) return;
     setSaving(true);
-    await onSave({ ...f, brand: f.brand.trim() }, again);
+    setFailed(false);
+    const ok = await onSave({ ...f, brand: brand.trim() }, again);
+    if (ok === false) setFailed(true);
     setSaving(false);
   }
 
+  // Tapping outside closes the form only when nothing has been typed yet.
+  const onBackdrop = () => {
+    if (!dirty && !saving) onClose();
+  };
+
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" onClick={onBackdrop}>
       <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="sheet-head">
           <h2>{isNew ? 'New deliverable' : 'Edit deliverable'}</h2>
@@ -586,7 +651,7 @@ function ItemForm({ item, onClose, onSave, onDelete }) {
         >
           <label className="field full">
             <span>Brand *</span>
-            <input className="input" value={f.brand} onChange={set('brand')} placeholder="e.g. Glow Theory" required autoFocus={isNew} />
+            <input className="input" value={f.brand} onChange={set('brand')} placeholder="e.g. Glow Theory" required autoFocus={isNew && !isTouch} />
           </label>
 
           <div className="field full">
@@ -613,6 +678,11 @@ function ItemForm({ item, onClose, onSave, onDelete }) {
             <span>Go-live date</span>
             <input className="input" type="date" value={f.goLive} onChange={set('goLive')} />
           </label>
+          {datesBackwards && (
+            <p className="warn full">
+              ⚠ Go-live is before the draft due date. Check the dates are the right way round.
+            </p>
+          )}
 
           <label className="field">
             <span>Status</span>
@@ -657,13 +727,18 @@ function ItemForm({ item, onClose, onSave, onDelete }) {
             </a>
           )}
 
+          {failed && (
+            <p className="warn error full">
+              Not saved yet. Your details are still here. Check your connection and tap Save again.
+            </p>
+          )}
           <div className="form-actions full">
             {!isNew && (
               <button
                 type="button"
                 className="btn danger ghost"
                 onClick={() => {
-                  if (confirm(`Delete this ${f.type} for ${f.brand}?`)) onDelete(f.id);
+                  if (confirm(`Delete this ${f.type} for ${brand}?`)) onDelete(f.id);
                 }}
               >
                 Delete
@@ -671,11 +746,11 @@ function ItemForm({ item, onClose, onSave, onDelete }) {
             )}
             <span className="spacer" />
             {isNew && (
-              <button type="button" className="btn ghost" disabled={saving || !f.brand.trim()} onClick={() => submit(true)}>
+              <button type="button" className="btn ghost" disabled={saving || !brand.trim()} onClick={() => submit(true)}>
                 Save + add another
               </button>
             )}
-            <button type="submit" className="btn primary" disabled={saving || !f.brand.trim()}>
+            <button type="submit" className="btn primary" disabled={saving || !brand.trim()}>
               {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
