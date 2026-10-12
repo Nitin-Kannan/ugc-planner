@@ -1,7 +1,11 @@
 // Talks to the Google Apps Script web app that reads/writes the Google Sheet.
 // If no Apps Script URL is set yet, the app runs in Demo mode and keeps
 // sample data in this browser only.
-import { addDays, todayStr, newId } from './utils';
+import { addDays, todayStr, newId, normDate } from './utils';
+
+// Clean up dates typed straight into the sheet (e.g. 14/10/2026 → 2026-10-14).
+const clean = (items) =>
+  items.map((it) => ({ ...it, draftDue: normDate(it.draftDue), goLive: normDate(it.goLive) }));
 
 const SETTINGS_KEY = 'ugc-planner-settings';
 const DEMO_KEY = 'ugc-planner-demo';
@@ -78,9 +82,9 @@ function demoWrite(items) {
 
 // ---------- Public API ----------
 export async function listItems() {
-  if (isDemo()) return demoRead();
+  if (isDemo()) return clean(demoRead());
   const data = await call('list');
-  return data.items;
+  return clean(data.items);
 }
 
 export async function saveItem(item) {

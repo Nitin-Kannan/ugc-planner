@@ -10,6 +10,31 @@ export const parse = (s) => {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d);
 };
+const validIso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(parse(s));
+
+// Turns whatever is in the sheet into "YYYY-MM-DD".
+// Accepts 2026-10-14, 14/10/2026, 14-10-2026, 14.10.2026 (day first, Indian style),
+// 2026-10-14T00:00:00Z and text like "14 Oct 2026". Returns '' for blanks.
+// Anything it still can't read is returned unchanged so no data is thrown away.
+export function normDate(v) {
+  if (v === null || v === undefined) return '';
+  const s = String(v).trim();
+  if (!s) return '';
+  // Full timestamps (2026-10-12T18:30:00.000Z) → convert to the local day,
+  // otherwise a date saved at midnight in India would show one day early.
+  if (/^\d{4}-\d{1,2}-\d{1,2}T/.test(s)) {
+    const t = new Date(s);
+    if (!isNaN(t)) return toStr(t);
+  }
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+  if (m) return `${m[3]}-${pad(m[2])}-${pad(m[1])}`;
+  const d = new Date(s);
+  if (!isNaN(d)) return toStr(d);
+  return s;
+}
+export const isValidDate = (s) => !!s && validIso(s);
 export const todayStr = () => toStr(new Date());
 export const addDays = (s, n) => {
   const d = parse(s);
@@ -20,11 +45,13 @@ export const diffDays = (a, b) => Math.round((parse(a) - parse(b)) / 86400000);
 
 export function fmtDate(s) {
   if (!s) return '—';
+  if (!isValidDate(s)) return `⚠ ${s}`;
   return parse(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
 export function relDay(s) {
   if (!s) return 'No date';
+  if (!isValidDate(s)) return 'Check date';
   const n = diffDays(s, todayStr());
   if (n === 0) return 'Today';
   if (n === 1) return 'Tomorrow';
@@ -47,7 +74,7 @@ export function keyDate(it) {
 
 export function isOverdue(it) {
   const k = keyDate(it);
-  return !!k && !isDone(it) && k.date < todayStr();
+  return !!k && isValidDate(k.date) && !isDone(it) && k.date < todayStr();
 }
 
 const inr = new Intl.NumberFormat('en-IN', {
