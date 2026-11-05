@@ -636,8 +636,8 @@ function WeekView({ items, onOpen, onSave, onAdd, goTo }) {
         ]}
       />
 
-      <section className="panel">
-        {nothing ? (
+      {nothing ? (
+        <section className="panel">
           <EmptyState
             icon={CalendarCheck}
             title="Nothing due in the next 7 days"
@@ -654,38 +654,42 @@ function WeekView({ items, onOpen, onSave, onAdd, goTo }) {
               )
             }
           />
-        ) : (
-          <>
-            <Group title="Overdue" tone="red" items={overdue} empty="Nothing overdue." onOpen={onOpen} onSave={onSave} />
-            <Group title="Today" tone="amber" items={today} empty="Nothing due today." onOpen={onOpen} onSave={onSave} />
-            <Group title="Next 7 days" tone="accent" items={soon} empty="Nothing else due this week." onOpen={onOpen} onSave={onSave} />
-            {later.length > 0 && (
-              <button className="panel-foot" onClick={() => goTo('all')}>
-                <span>{plural(later.length, 'more deliverable')} scheduled after {fmtDate(week)}</span>
-                <ChevronRight size={16} strokeWidth={1.75} />
-              </button>
-            )}
-          </>
-        )}
-      </section>
+        </section>
+      ) : (
+        <div className="sections">
+          <Group title="Overdue" tone="red" items={overdue} empty="Nothing overdue" onOpen={onOpen} onSave={onSave} />
+          <Group title="Today" tone="amber" items={today} empty="Nothing due today" onOpen={onOpen} onSave={onSave} />
+          <Group title="Next 7 days" tone="accent" items={soon} empty="Nothing else due this week" onOpen={onOpen} onSave={onSave} />
+          {later.length > 0 && (
+            <button className="later-link" onClick={() => goTo('all')}>
+              <span>{plural(later.length, 'more deliverable')} scheduled after {fmtDate(week)}</span>
+              <ChevronRight size={16} strokeWidth={1.75} />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
+// One section of This week: a heading, then its own card of rows.
+// An empty section collapses to a single line so it doesn't take up space.
 function Group({ title, tone, items, empty, onOpen, onSave }) {
+  const isEmpty = items.length === 0;
   return (
-    <div className="group">
-      <div className="group-head">
+    <section className={'section' + (isEmpty ? ' is-empty' : '')} aria-label={title}>
+      <div className="section-head">
         <i className={'ind ind-' + tone} />
         <h2>{title}</h2>
         <span className="count">{items.length}</span>
+        {isEmpty && <span className="section-empty">{empty}</span>}
       </div>
-      {items.length === 0 ? (
-        <p className="group-empty">{empty}</p>
-      ) : (
-        items.map((it) => <ItemRow key={it.id} it={it} onOpen={onOpen} onSave={onSave} />)
+      {!isEmpty && (
+        <div className="panel">
+          {items.map((it) => <ItemRow key={it.id} it={it} onOpen={onOpen} onSave={onSave} />)}
+        </div>
       )}
-    </div>
+    </section>
   );
 }
 

@@ -385,23 +385,44 @@ button.sync:hover { background: var(--hover); color: var(--text-2); }
   .stat-hint { display: none; }
 }
 
-/* ---------- Groups (This week) ---------- */
-.group + .group { border-top: 1px solid var(--border); }
-.group-head {
+/* ---------- Sections (This week) ---------- */
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  margin-top: var(--s-2);
+}
+.section { display: flex; flex-direction: column; gap: var(--s-2); }
+.section-head {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  height: 36px;
-  padding: 0 var(--s-4);
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+  padding: 0 2px;
+  min-height: 20px;
+  flex-wrap: wrap;
 }
-.group-head h2 { font-size: 13px; font-weight: 600; }
-.group-empty {
-  padding: var(--s-3) var(--s-4);
+.section-head h2 { font-size: 14px; font-weight: 600; }
+.section-empty {
   font-size: 13px;
   color: var(--text-3);
+  margin-left: var(--s-2);
 }
+/* Empty sections sit closer together so they don't leave holes */
+.section.is-empty + .section.is-empty { margin-top: calc(-1 * var(--s-2)); }
+
+.later-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+}
+.later-link:hover { background: var(--surface); border-style: solid; color: var(--text); }
 
 /* ---------- Rows ---------- */
 .row {
