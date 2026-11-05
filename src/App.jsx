@@ -1,26 +1,38 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  Plus, RefreshCw, Settings2, CalendarClock, CalendarDays, ListTodo, Wallet, Search,
+  ChevronLeft, ChevronRight, ChevronDown, Check, X, Users, TriangleAlert, ExternalLink,
+  Trash2, CircleCheck, PencilLine, Send, CalendarCheck, Info, CircleAlert, SearchX,
+} from 'lucide-react';
 import * as api from './api';
 import {
-  TYPES, STATUSES, PAYMENTS, todayStr, addDays, parse, toStr, fmtDate, relDay,
-  keyDate, isDone, isOverdue, money, newId, emptyItem,
+  TYPES, STATUSES, PAYMENTS, todayStr, addDays, parse, toStr, fmtDate, diffDays,
+  keyDate, isDone, isOverdue, isValidDate, money, newId, emptyItem,
 } from './utils';
 
 const TABS = [
-  { id: 'week', label: 'This week', icon: '⚡' },
-  { id: 'calendar', label: 'Calendar', icon: '🗓️' },
-  { id: 'all', label: 'All', icon: '📋' },
-  { id: 'money', label: 'Payments', icon: '💸' },
+  { id: 'week', label: 'This week', Icon: CalendarClock },
+  { id: 'calendar', label: 'Calendar', Icon: CalendarDays },
+  { id: 'all', label: 'All', Icon: ListTodo },
+  { id: 'money', label: 'Payments', Icon: Wallet },
 ];
 
 // On phones, don't pop the keyboard open the moment the form appears.
 const isTouch = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
 
-const typeClass = (t) => 'type-' + String(t || 'Reel').toLowerCase();
-const statusClass = (s) => 'st-' + String(s || '').toLowerCase().replace(/\s+/g, '-');
+const typeKey = (t) => 't-' + String(t || 'Reel').toLowerCase();
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const weekday = (s) => parse(s).toLocaleDateString('en-IN', { weekday: 'long' });
+
+/* ------------------------------------------------------------------ */
+/* App shell                                                           */
+/* ------------------------------------------------------------------ */
 
 export default function App() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('week');
   const [editing, setEditing] = useState(null); // item being edited, or null
@@ -35,7 +47,8 @@ export default function App() {
   // silent = refresh in the background without the loading screen
   async function load(silent = false) {
     if (!silent) {
-      setLoading(true);
+      setLoading(items.length === 0);
+      setRefreshing(true);
       setError('');
     }
     try {
@@ -48,7 +61,10 @@ export default function App() {
     } catch (e) {
       if (!silent) setError(e.message);
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
@@ -127,73 +143,107 @@ export default function App() {
   }
 
   const overdueCount = items.filter(isOverdue).length;
+  const addNew = () => setEditing(emptyItem());
 
   return (
     <div className="app">
-      <header className="top">
-        <div className="brandmark">
-          <img src="./icon.svg" alt="" width="34" height="34" />
-          <div>
-            <h1>UGC Planner</h1>
-            <p className="sub">
-              {demo ? 'Demo mode · sample data' : 'Synced with Google Sheets'}
-            </p>
+      <header className="topbar">
+        <div className="topbar-row container">
+          <div className="brand">
+            <Logo />
+            <span className="brand-name">UGC Planner</span>
+            {demo ? (
+              <button className="sync demo" onClick={() => setShowSettings(true)} title="Connect your Google Sheet">
+                <i className="sync-dot" />
+                <span className="sync-text">Sample data</span>
+              </button>
+            ) : (
+              <span className={'sync' + (error ? ' bad' : '')} title={error ? 'Could not reach the Google Sheet' : 'Synced with Google Sheets'}>
+                <i className="sync-dot" />
+                <span className="sync-text">{error ? 'Offline' : refreshing ? 'Syncing' : 'Synced'}</span>
+              </span>
+            )}
+          </div>
+          <div className="top-actions">
+            <button className="icon-btn" onClick={() => load()} title="Refresh from Google Sheets" aria-label="Refresh">
+              <RefreshCw size={16} strokeWidth={1.75} className={refreshing ? 'spin' : ''} />
+            </button>
+            <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings">
+              <Settings2 size={16} strokeWidth={1.75} />
+            </button>
+            <button className="btn primary" onClick={addNew}>
+              <Plus size={16} strokeWidth={2} />
+              <span className="label-wide">New deliverable</span>
+              <span className="label-narrow">New</span>
+            </button>
           </div>
         </div>
-        <div className="top-actions">
-          <button className="icon-btn" onClick={() => load()} title="Refresh" aria-label="Refresh">↻</button>
-          <button className="icon-btn" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings">⚙︎</button>
-        </div>
+
+        <nav className="tabs container" aria-label="Views">
+          {TABS.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              className={'tab' + (tab === id ? ' active' : '')}
+              aria-current={tab === id ? 'page' : undefined}
+              onClick={() => setTab(id)}
+            >
+              <Icon size={16} strokeWidth={1.75} />
+              <span>{label}</span>
+              {id === 'week' && overdueCount > 0 && (
+                <span className="tab-badge" title={`${overdueCount} overdue`}>{overdueCount}</span>
+              )}
+            </button>
+          ))}
+        </nav>
       </header>
 
-      {demo && (
-        <button className="demo-banner" onClick={() => setShowSettings(true)}>
-          You're viewing sample data. <b>Connect your Google Sheet →</b>
-        </button>
-      )}
-
-      <nav className="tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={'tab' + (tab === t.id ? ' active' : '')}
-            onClick={() => setTab(t.id)}
-          >
-            <span className="tab-icon">{t.icon}</span>
-            <span>{t.label}</span>
-            {t.id === 'week' && overdueCount > 0 && <span className="badge">{overdueCount}</span>}
-          </button>
-        ))}
-      </nav>
-
-      <main className="content">
-        {loading && <div className="state">Loading your deliverables…</div>}
-        {!loading && error && (
-          <div className="state error">
-            <p>{error}</p>
-            <button className="btn" onClick={() => load()}>Try again</button>
+      <main className="content container">
+        {demo && (
+          <div className="notice">
+            <Info size={16} strokeWidth={1.75} />
+            <p>
+              You're viewing sample data.
+              <span className="label-wide"> Changes stay on this device until you connect a Google Sheet.</span>
+            </p>
+            <button className="link-btn" onClick={() => setShowSettings(true)}>Connect sheet</button>
           </div>
         )}
-        {!loading && !error && (
+
+        {loading && <Loading />}
+        {!loading && error && items.length === 0 && (
+          <div className="panel">
+            <EmptyState
+              icon={CircleAlert}
+              tone="red"
+              title="Couldn't load your deliverables"
+              text={error}
+              action={<button className="btn" onClick={() => load()}>Try again</button>}
+            />
+          </div>
+        )}
+        {!loading && (!error || items.length > 0) && (
           <>
-            {tab === 'week' && <WeekView items={items} onOpen={setEditing} onSave={save} />}
-            {tab === 'calendar' && <CalendarView items={items} onOpen={setEditing} />}
-            {tab === 'all' && <AllView items={items} onOpen={setEditing} />}
+            {error && (
+              <div className="notice bad">
+                <CircleAlert size={16} strokeWidth={1.75} />
+                <p>Couldn't refresh from Google Sheets. Showing the last loaded data.</p>
+                <button className="link-btn" onClick={() => load()}>Retry</button>
+              </div>
+            )}
+            {tab === 'week' && <WeekView items={items} onOpen={setEditing} onSave={save} onAdd={addNew} goTo={setTab} />}
+            {tab === 'calendar' && <CalendarView items={items} onOpen={setEditing} onSave={save} />}
+            {tab === 'all' && <AllView items={items} onOpen={setEditing} onSave={save} onAdd={addNew} />}
             {tab === 'money' && <MoneyView items={items} onOpen={setEditing} onSave={save} />}
           </>
         )}
       </main>
-
-      <button className="fab" onClick={() => setEditing(emptyItem())} aria-label="Add deliverable">
-        <span>＋</span> Add
-      </button>
 
       {editing && (
         <ItemForm
           item={editing}
           onClose={() => setEditing(null)}
           onSave={async (it, again) => {
-            const ok = await save(it, it.id ? 'Updated' : 'Added');
+            const ok = await save(it, it.id ? 'Changes saved' : 'Deliverable added');
             if (!ok) return false; // keep the form open with what she typed
             if (again) {
               // Same brand, next deliverable (e.g. 1 Reel + 3 Stories)
@@ -218,47 +268,335 @@ export default function App() {
         />
       )}
 
-      {toast && <div className="toast">{toast}</div>}
+      {toast && <Toast message={toast} />}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Card used in lists                                                  */
+/* Small shared pieces                                                 */
 /* ------------------------------------------------------------------ */
 
-function ItemCard({ it, onOpen, onSave, showMarkLive = true }) {
-  const k = keyDate(it);
-  const late = isOverdue(it);
-  const nextStatus = STATUSES[STATUSES.indexOf(it.status) + 1];
+function Logo() {
   return (
-    <article className={'card' + (late ? ' late' : '') + (isDone(it) ? ' done' : '')}>
-      <button className="card-main" onClick={() => onOpen(it)}>
-        <div className="card-row">
-          <span className={'chip ' + typeClass(it.type)}>{it.type}</span>
-          {it.collab && <span className="chip collab">Collab</span>}
-          <span className={'status ' + statusClass(it.status)}>{it.status}</span>
+    // Same mark as the home-screen icon: a queue of content frames, front one done.
+    <svg className="logo" width="26" height="26" viewBox="0 0 1024 1024" aria-hidden="true">
+      <defs>
+        <linearGradient id="logo-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#6461e0" />
+          <stop offset="1" stopColor="#3f3cb4" />
+        </linearGradient>
+      </defs>
+      <rect width="1024" height="1024" rx="230" fill="url(#logo-bg)" />
+      <rect x="456" y="250" width="260" height="440" rx="56" fill="#fff" opacity=".28" />
+      <rect x="408" y="292" width="260" height="440" rx="56" fill="#fff" opacity=".5" />
+      <rect x="308" y="334" width="300" height="456" rx="62" fill="#fff" />
+      <path d="M388 566 l52 52 l96 -106" fill="none" stroke="#4744bf" strokeWidth="50" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function Loading() {
+  return (
+    <div className="panel loading" aria-busy="true" aria-label="Loading deliverables">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="skeleton-row">
+          <span className="sk sk-a" />
+          <span className="sk sk-b" />
+          <span className="sk sk-c" />
         </div>
-        <h3>{it.brand}</h3>
-        {k && (
-          <p className={'when' + (late ? ' late-text' : '')}>
-            {k.label}: <b>{relDay(k.date)}</b>
-            <span className="muted"> · {fmtDate(k.date)}</span>
-          </p>
-        )}
-        {it.notes && <p className="notes">{it.notes}</p>}
+      ))}
+    </div>
+  );
+}
+
+function Toast({ message }) {
+  const bad = message.startsWith('Not ');
+  return (
+    <div className={'toast' + (bad ? ' bad' : '')} role="status">
+      {bad ? <CircleAlert size={16} strokeWidth={1.75} /> : <Check size={16} strokeWidth={2} />}
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, title, text, action, tone }) {
+  return (
+    <div className="empty">
+      <span className={'empty-icon' + (tone ? ' ' + tone : '')}>
+        <Icon size={18} strokeWidth={1.75} />
+      </span>
+      <div className="empty-copy">
+        <p className="empty-title">{title}</p>
+        {text && <p className="empty-text">{text}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function TypeTag({ type }) {
+  return (
+    <span className={'type ' + typeKey(type)}>
+      <i className="type-mark" />
+      {type}
+    </span>
+  );
+}
+
+// Linear-style progress ring: empty for Briefed, filling up to a check for Live.
+const STAGE_FRACTION = { Briefed: 0, Shooting: 0.25, 'Draft sent': 0.5, Approved: 0.75, Live: 1 };
+
+function StageIcon({ status }) {
+  const f = STAGE_FRACTION[status] ?? 0;
+  if (f === 1) {
+    return (
+      <svg className="stage-icon" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <circle cx="7" cy="7" r="6.25" fill="var(--green)" />
+        <path d="M4.4 7.2l1.8 1.8 3.4-3.7" fill="none" stroke="var(--surface)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  const color = f === 0 ? 'var(--text-3)' : 'var(--accent)';
+  const r = 3.4;
+  const a = f * 2 * Math.PI;
+  const x = 7 + r * Math.sin(a);
+  const y = 7 - r * Math.cos(a);
+  return (
+    <svg className="stage-icon" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <circle cx="7" cy="7" r="5.9" fill="none" stroke={color} strokeWidth="1.5" strokeDasharray={f === 0 ? '2.2 1.9' : undefined} />
+      {f > 0 && <path d={`M7 7 L7 ${7 - r} A${r} ${r} 0 ${f > 0.5 ? 1 : 0} 1 ${x} ${y} Z`} fill={color} />}
+    </svg>
+  );
+}
+
+// A dropdown that renders above everything (so tables and scroll areas never clip it).
+function Menu({ label, trigger, triggerClass, items, onSelect, width = 196 }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btn = useRef(null);
+  const menu = useRef(null);
+
+  function toggle(e) {
+    e.stopPropagation();
+    if (open) return setOpen(false);
+    const r = btn.current.getBoundingClientRect();
+    const h = items.length * 34 + 40;
+    const up = r.bottom + h + 8 > window.innerHeight && r.top > h + 8;
+    const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8);
+    setPos({ top: up ? r.top - h - 4 : r.bottom + 4, left });
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e) => {
+      if (menu.current?.contains(e.target) || btn.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const key = (e) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        btn.current?.focus();
+      }
+    };
+    const close = (e) => {
+      if (menu.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', key);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    menu.current?.querySelector('[aria-checked="true"]')?.focus();
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', key);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        className={triggerClass}
+        onClick={toggle}
+        onKeyDown={(e) => e.stopPropagation()}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+      >
+        {trigger}
       </button>
-      {onSave && showMarkLive && nextStatus && (
-        <div className="card-actions">
-          <button
-            className="btn small ghost"
-            onClick={() => onSave({ ...it, status: nextStatus }, `Moved to ${nextStatus}`)}
+      {open &&
+        createPortal(
+          <div
+            ref={menu}
+            className="menu"
+            role="menu"
+            aria-label={label}
+            style={{ top: pos.top, left: pos.left, width }}
+            onClick={(e) => e.stopPropagation()}
           >
-            Move to {nextStatus} →
-          </button>
+            <p className="menu-label">{label}</p>
+            {items.map((i) => (
+              <button
+                key={i.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={!!i.selected}
+                className={'menu-item' + (i.selected ? ' selected' : '')}
+                onClick={() => {
+                  setOpen(false);
+                  if (!i.selected) onSelect(i.value);
+                }}
+              >
+                {i.icon}
+                <span>{i.label}</span>
+                {i.selected && <Check size={14} strokeWidth={2} className="menu-check" />}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
+function StageMenu({ it, onSave, compact }) {
+  return (
+    <Menu
+      label="Change stage"
+      triggerClass={'stage-btn' + (compact ? ' compact' : '')}
+      trigger={
+        <>
+          <StageIcon status={it.status} />
+          <span className="stage-name">{it.status}</span>
+          <ChevronDown size={14} strokeWidth={1.75} className="chev" />
+        </>
+      }
+      items={STATUSES.map((s) => ({ value: s, label: s, icon: <StageIcon status={s} />, selected: s === it.status }))}
+      onSelect={(s) => onSave({ ...it, status: s }, `Moved to ${s}`)}
+    />
+  );
+}
+
+function PaymentMenu({ it, onSave }) {
+  const p = it.payment || 'Unpaid';
+  return (
+    <Menu
+      label="Payment status"
+      width={168}
+      triggerClass={'pay-badge pay-' + p.toLowerCase()}
+      trigger={
+        <>
+          <i className="pay-dot" />
+          {p}
+          <ChevronDown size={14} strokeWidth={1.75} className="chev" />
+        </>
+      }
+      items={PAYMENTS.map((s) => ({
+        value: s,
+        label: s,
+        icon: <i className={'pay-dot pay-' + s.toLowerCase()} />,
+        selected: s === p,
+      }))}
+      onSelect={(s) => onSave({ ...it, payment: s }, `Marked as ${s.toLowerCase()}`)}
+    />
+  );
+}
+
+// What the deadline line on a row says, and how urgent it looks.
+function deadlineOf(it, kind) {
+  const k = kind
+    ? { label: kind === 'draft' ? 'Draft due' : 'Goes live', date: kind === 'draft' ? it.draftDue : it.goLive }
+    : keyDate(it);
+  if (!k || !k.date) return null;
+  const draft = k.label === 'Draft due';
+  const Icon = draft ? PencilLine : Send;
+  if (!isValidDate(k.date)) return { Icon, tone: 'red', text: `Check ${draft ? 'draft' : 'go-live'} date` };
+  if (kind) return { Icon, tone: 'muted', text: draft ? 'Draft due' : 'Goes live' };
+
+  const n = diffDays(k.date, todayStr());
+  const done = isDone(it);
+  if (done) return { Icon, tone: 'muted', text: n < 0 ? `Went live ${fmtDate(k.date)}` : `Live ${fmtDate(k.date)}` };
+  if (n < 0) return { Icon, tone: 'red', text: `${draft ? 'Draft' : 'Go-live'} ${plural(-n, 'day')} late` };
+  if (n === 0) return { Icon, tone: 'amber', text: draft ? 'Draft due today' : 'Goes live today' };
+  if (n === 1) return { Icon, tone: 'amber', text: draft ? 'Draft due tomorrow' : 'Goes live tomorrow' };
+  if (n < 7) return { Icon, tone: 'default', text: `${draft ? 'Draft due' : 'Goes live'} ${weekday(k.date)}` };
+  return { Icon, tone: 'default', text: `${draft ? 'Draft due' : 'Goes live'} ${fmtDate(k.date)}` };
+}
+
+/* ------------------------------------------------------------------ */
+/* Deliverable row (used in lists)                                     */
+/* ------------------------------------------------------------------ */
+
+function ItemRow({ it, onOpen, onSave, kind }) {
+  const due = deadlineOf(it, kind);
+  return (
+    <div
+      className={'row' + (isDone(it) ? ' done' : '')}
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(it)}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onOpen(it);
+        }
+      }}
+    >
+      <div className="row-type"><TypeTag type={it.type} /></div>
+      <div className="row-main">
+        <div className="row-title">
+          <span className="row-brand">{it.brand}</span>
+          {it.collab && (
+            <span className="collab" title="Instagram Collab post">
+              <Users size={13} strokeWidth={1.75} />
+              Collab
+            </span>
+          )}
         </div>
-      )}
-    </article>
+        {it.notes && <p className="row-notes">{it.notes}</p>}
+      </div>
+      <div className={'row-due tone-' + (due?.tone || 'muted')}>
+        {due ? (
+          <>
+            <due.Icon size={14} strokeWidth={1.75} />
+            <span>{due.text}</span>
+          </>
+        ) : (
+          <span className="muted">No date</span>
+        )}
+      </div>
+      <div className="row-stage">
+        <StageMenu it={it} onSave={onSave} />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Stats strip                                                         */
+/* ------------------------------------------------------------------ */
+
+function Stats({ stats }) {
+  return (
+    <div className="stats">
+      {stats.map((s) => (
+        <div key={s.label} className="stat">
+          <p className="stat-label">
+            <i className={'ind ind-' + s.tone} />
+            {s.label}
+          </p>
+          <p className="stat-value">{s.value}</p>
+          {s.hint && <p className="stat-hint">{s.hint}</p>}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -266,7 +604,7 @@ function ItemCard({ it, onOpen, onSave, showMarkLive = true }) {
 /* This week                                                           */
 /* ------------------------------------------------------------------ */
 
-function WeekView({ items, onOpen, onSave }) {
+function WeekView({ items, onOpen, onSave, onAdd, goTo }) {
   const t = todayStr();
   const week = addDays(t, 7);
   const open = items.filter((x) => !isDone(x));
@@ -286,52 +624,68 @@ function WeekView({ items, onOpen, onSave }) {
   });
 
   const liveThisWeek = items.filter((x) => x.goLive >= t && x.goLive <= week).length;
+  const nothing = overdue.length + today.length + soon.length === 0;
 
   return (
     <div className="stack">
-      <div className="stats">
-        <Stat label="Overdue" value={overdue.length} tone="red" />
-        <Stat label="Due today" value={today.length} tone="orange" />
-        <Stat label="Going live in 7 days" value={liveThisWeek} tone="purple" />
+      <Stats
+        stats={[
+          { label: 'Overdue', value: overdue.length, tone: 'red', hint: overdue.length ? 'Past their deadline' : 'All on track' },
+          { label: 'Due today', value: today.length, tone: 'amber', hint: fmtDate(t) },
+          { label: 'Going live', value: liveThisWeek, tone: 'accent', hint: `By ${fmtDate(week)}` },
+        ]}
+      />
+
+      <section className="panel">
+        {nothing ? (
+          <EmptyState
+            icon={CalendarCheck}
+            title="Nothing due in the next 7 days"
+            text={
+              later.length
+                ? `${plural(later.length, 'deliverable')} scheduled after ${fmtDate(week)}.`
+                : 'Deliverables you add will appear here, sorted by deadline.'
+            }
+            action={
+              later.length ? (
+                <button className="btn" onClick={() => goTo('all')}>View all</button>
+              ) : (
+                <button className="btn" onClick={onAdd}><Plus size={16} strokeWidth={2} />New deliverable</button>
+              )
+            }
+          />
+        ) : (
+          <>
+            <Group title="Overdue" tone="red" items={overdue} empty="Nothing overdue." onOpen={onOpen} onSave={onSave} />
+            <Group title="Today" tone="amber" items={today} empty="Nothing due today." onOpen={onOpen} onSave={onSave} />
+            <Group title="Next 7 days" tone="accent" items={soon} empty="Nothing else due this week." onOpen={onOpen} onSave={onSave} />
+            {later.length > 0 && (
+              <button className="panel-foot" onClick={() => goTo('all')}>
+                <span>{plural(later.length, 'more deliverable')} scheduled after {fmtDate(week)}</span>
+                <ChevronRight size={16} strokeWidth={1.75} />
+              </button>
+            )}
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Group({ title, tone, items, empty, onOpen, onSave }) {
+  return (
+    <div className="group">
+      <div className="group-head">
+        <i className={'ind ind-' + tone} />
+        <h2>{title}</h2>
+        <span className="count">{items.length}</span>
       </div>
-
-      <Section title="🔴 Overdue" items={overdue} empty="Nothing overdue. Nice!" onOpen={onOpen} onSave={onSave} />
-      <Section title="📍 Today" items={today} empty="Nothing due today." onOpen={onOpen} onSave={onSave} />
-      <Section title="📅 Next 7 days" items={soon} empty="A clear week ahead." onOpen={onOpen} onSave={onSave} />
-      {later.length > 0 && (
-        <p className="muted center">
-          + {later.length} more deliverable{later.length > 1 ? 's' : ''} later. See the Calendar or All tab.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function Stat({ label, value, tone }) {
-  return (
-    <div className={'stat ' + tone}>
-      <span className="stat-value">{value}</span>
-      <span className="stat-label">{label}</span>
-    </div>
-  );
-}
-
-function Section({ title, items, empty, onOpen, onSave }) {
-  return (
-    <section>
-      <h2 className="section-title">
-        {title} <span className="count">{items.length}</span>
-      </h2>
       {items.length === 0 ? (
-        <p className="empty">{empty}</p>
+        <p className="group-empty">{empty}</p>
       ) : (
-        <div className="grid">
-          {items.map((it) => (
-            <ItemCard key={it.id} it={it} onOpen={onOpen} onSave={onSave} />
-          ))}
-        </div>
+        items.map((it) => <ItemRow key={it.id} it={it} onOpen={onOpen} onSave={onSave} />)
       )}
-    </section>
+    </div>
   );
 }
 
@@ -339,7 +693,7 @@ function Section({ title, items, empty, onOpen, onSave }) {
 /* Calendar                                                            */
 /* ------------------------------------------------------------------ */
 
-function CalendarView({ items, onOpen }) {
+function CalendarView({ items, onOpen, onSave }) {
   const t = todayStr();
   const [month, setMonth] = useState(() => {
     const d = new Date();
@@ -370,74 +724,89 @@ function CalendarView({ items, onOpen }) {
   const monthIdx = month.getMonth();
   const selectedEvents = eventsOn(selected);
   const shift = (n) => setMonth(new Date(month.getFullYear(), month.getMonth() + n, 1));
+  const goToday = () => {
+    const d = new Date();
+    setMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+    setSelected(t);
+  };
 
   return (
-    <div className="stack">
-      <div className="cal-head">
-        <button className="icon-btn" onClick={() => shift(-1)} aria-label="Previous month">‹</button>
-        <h2>{month.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</h2>
-        <button className="icon-btn" onClick={() => shift(1)} aria-label="Next month">›</button>
-      </div>
-
-      <div className="legend">
-        <span><i className="dot type-reel" />Reel</span>
-        <span><i className="dot type-story" />Story</span>
-        <span><i className="dot type-post" />Post</span>
-        <span><i className="dot type-carousel" />Carousel</span>
-        <span className="legend-break"><i className="dot live" />Goes live</span>
-        <span><i className="dot outline" />Draft due</span>
-      </div>
-
-      <div className="cal">
-        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-          <div key={d} className="cal-dow">{d}</div>
-        ))}
-        {cells.map((d) => {
-          const ev = eventsOn(d);
-          const inMonth = parse(d).getMonth() === monthIdx;
-          return (
-            <button
-              key={d}
-              className={
-                'cal-cell' +
-                (inMonth ? '' : ' other') +
-                (d === t ? ' today' : '') +
-                (d === selected ? ' selected' : '') +
-                (ev.length >= 3 ? ' busy' : '')
-              }
-              onClick={() => setSelected(d)}
-            >
-              <span className="cal-num">{parse(d).getDate()}</span>
-              <span className="cal-events">
-                {ev.slice(0, 3).map(({ it, kind }) => (
-                  <span
-                    key={it.id + kind}
-                    className={'cal-pill ' + typeClass(it.type) + (kind === 'draft' ? ' outline' : '')}
-                  >
-                    {it.brand}
-                  </span>
-                ))}
-                {ev.length > 3 && <span className="cal-more">+{ev.length - 3}</span>}
-              </span>
+    <div className="cal-layout">
+      <section className="panel cal-panel">
+        <div className="panel-head">
+          <h2>{month.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</h2>
+          <div className="cal-nav">
+            <button className="btn small" onClick={goToday}>Today</button>
+            <button className="icon-btn" onClick={() => shift(-1)} aria-label="Previous month">
+              <ChevronLeft size={16} strokeWidth={1.75} />
             </button>
-          );
-        })}
-      </div>
+            <button className="icon-btn" onClick={() => shift(1)} aria-label="Next month">
+              <ChevronRight size={16} strokeWidth={1.75} />
+            </button>
+          </div>
+        </div>
 
-      <section>
-        <h2 className="section-title">
-          {parse(selected).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+        <div className="cal">
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+            <div key={d} className="cal-dow">{d}</div>
+          ))}
+          {cells.map((d) => {
+            const ev = eventsOn(d);
+            const inMonth = parse(d).getMonth() === monthIdx;
+            return (
+              <button
+                key={d}
+                className={
+                  'cal-cell' +
+                  (inMonth ? '' : ' other') +
+                  (d === t ? ' today' : '') +
+                  (d === selected ? ' selected' : '') +
+                  (ev.length >= 3 ? ' busy' : '')
+                }
+                onClick={() => setSelected(d)}
+                aria-label={`${parse(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}, ${plural(ev.length, 'item')}`}
+                aria-pressed={d === selected}
+              >
+                <span className="cal-num">{parse(d).getDate()}</span>
+                <span className="cal-events">
+                  {ev.slice(0, 3).map(({ it, kind }) => (
+                    <span key={it.id + kind} className={'ev ' + typeKey(it.type) + ' ev-' + kind}>
+                      <i className="ev-mark" />
+                      <span className="ev-text">{it.brand}</span>
+                    </span>
+                  ))}
+                  {ev.length > 3 && <span className="cal-more">+{ev.length - 3} more</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="legend">
+          {TYPES.map((ty) => (
+            <span key={ty} className={typeKey(ty)}><i className="type-mark" />{ty}</span>
+          ))}
+          <span className="legend-sep" />
+          <span><i className="shape-live" />Goes live</span>
+          <span><i className="shape-draft" />Draft due</span>
+          <span><i className="shape-busy" />3+ items</span>
+        </div>
+      </section>
+
+      <section className="panel day-panel">
+        <div className="panel-head">
+          <h2>
+            {selected === t ? 'Today' : weekday(selected)}
+            <span className="sub">{parse(selected).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}</span>
+          </h2>
           <span className="count">{selectedEvents.length}</span>
-        </h2>
+        </div>
         {selectedEvents.length === 0 ? (
-          <p className="empty">Nothing scheduled. A good day for a new brand!</p>
+          <EmptyState icon={CalendarDays} title="Nothing scheduled" text="This day is free for a new brand." />
         ) : (
-          <div className="grid">
+          <div className="day-list">
             {selectedEvents.map(({ it, kind }) => (
-              <div key={it.id + kind}>
-                <p className="mini-label">{kind === 'live' ? 'Goes live' : 'Draft due'}</p>
-                <ItemCard it={it} onOpen={onOpen} />
-              </div>
+              <ItemRow key={it.id + kind} it={it} kind={kind} onOpen={onOpen} onSave={onSave} />
             ))}
           </div>
         )}
@@ -450,9 +819,12 @@ function CalendarView({ items, onOpen }) {
 /* All deliverables                                                    */
 /* ------------------------------------------------------------------ */
 
-function AllView({ items, onOpen }) {
+function AllView({ items, onOpen, onSave, onAdd }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('Active');
+
+  const countFor = (s) =>
+    s === 'Active' ? items.filter((x) => !isDone(x)).length : s === 'All' ? items.length : items.filter((x) => x.status === s).length;
 
   const filtered = items
     .filter((x) => {
@@ -467,57 +839,113 @@ function AllView({ items, onOpen }) {
     })
     .sort((a, b) => (a.goLive || '9999').localeCompare(b.goLive || '9999'));
 
+  const filtering = q.trim() || status !== 'Active';
+  const lateDate = (it, field) => {
+    const k = keyDate(it);
+    return isOverdue(it) && k && k.date === it[field];
+  };
+
   return (
     <div className="stack">
-      <div className="filters">
-        <input
-          className="input"
-          placeholder="Search brand, contact, notes…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <div className="pills">
+      <div className="toolbar">
+        <label className="search">
+          <Search size={16} strokeWidth={1.75} />
+          <input
+            id="search"
+            placeholder="Search brand, contact or notes"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          {q && (
+            <button className="search-clear" onClick={() => setQ('')} aria-label="Clear search">
+              <X size={14} strokeWidth={2} />
+            </button>
+          )}
+        </label>
+        <div className="filter-tabs" role="tablist" aria-label="Filter by stage">
           {['Active', ...STATUSES, 'All'].map((s) => (
-            <button key={s} className={'pill' + (status === s ? ' on' : '')} onClick={() => setStatus(s)}>
+            <button
+              key={s}
+              role="tab"
+              aria-selected={status === s}
+              className={'filter-tab' + (status === s ? ' on' : '')}
+              onClick={() => setStatus(s)}
+            >
               {s}
+              <span className="filter-count">{countFor(s)}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <p className="empty">No deliverables match.</p>
-      ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Brand</th>
-                <th>Type</th>
-                <th>Draft due</th>
-                <th>Go live</th>
-                <th>Status</th>
-                <th className="num">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((it) => (
-                <tr key={it.id} onClick={() => onOpen(it)} className={isOverdue(it) ? 'late' : ''}>
-                  <td>
-                    <b>{it.brand}</b>
-                    {it.contact && <div className="muted small">{it.contact}</div>}
-                  </td>
-                  <td><span className={'chip ' + typeClass(it.type)}>{it.type}</span></td>
-                  <td>{fmtDate(it.draftDue)}</td>
-                  <td>{fmtDate(it.goLive)}</td>
-                  <td><span className={'status ' + statusClass(it.status)}>{it.status}</span></td>
-                  <td className="num">{it.amount ? money(it.amount) : '—'}</td>
+      <section className="panel">
+        {filtered.length === 0 ? (
+          items.length === 0 ? (
+            <EmptyState
+              icon={ListTodo}
+              title="No deliverables yet"
+              text="Add the first brand deal to start tracking it."
+              action={<button className="btn" onClick={onAdd}><Plus size={16} strokeWidth={2} />New deliverable</button>}
+            />
+          ) : (
+            <EmptyState
+              icon={SearchX}
+              title="No deliverables match"
+              text="Try another search or stage."
+              action={
+                filtering && (
+                  <button className="btn" onClick={() => { setQ(''); setStatus('Active'); }}>Clear filters</button>
+                )
+              }
+            />
+          )
+        ) : (
+          <>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Brand</th>
+                  <th>Type</th>
+                  <th>Draft due</th>
+                  <th>Go-live</th>
+                  <th>Stage</th>
+                  <th className="num">Amount</th>
                 </tr>
+              </thead>
+              <tbody>
+                {filtered.map((it) => (
+                  <tr
+                    key={it.id}
+                    tabIndex={0}
+                    onClick={() => onOpen(it)}
+                    onKeyDown={(e) => {
+                      if (e.target === e.currentTarget && e.key === 'Enter') onOpen(it);
+                    }}
+                  >
+                    <td>
+                      <div className="cell-brand">
+                        <span className="row-brand">{it.brand}</span>
+                        {it.collab && <Users size={13} strokeWidth={1.75} className="collab-icon" aria-label="Collab" />}
+                      </div>
+                      {it.contact && <div className="cell-sub">{it.contact}</div>}
+                    </td>
+                    <td><TypeTag type={it.type} /></td>
+                    <td className={'date' + (lateDate(it, 'draftDue') ? ' late' : '')}>{fmtDate(it.draftDue)}</td>
+                    <td className={'date' + (lateDate(it, 'goLive') ? ' late' : '')}>{fmtDate(it.goLive)}</td>
+                    <td onClick={(e) => e.stopPropagation()}><StageMenu it={it} onSave={onSave} compact /></td>
+                    <td className="num">{it.amount ? money(it.amount) : <span className="muted">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="list-mobile">
+              {filtered.map((it) => (
+                <ItemRow key={it.id} it={it} onOpen={onOpen} onSave={onSave} />
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }
@@ -534,67 +962,86 @@ function MoneyView({ items, onOpen, onSave }) {
   const unpaid = withAmount.filter((x) => x.payment === 'Unpaid');
   const chase = [...invoiced, ...unpaid.filter(isDone)]; // posted but not paid
 
-  const next = { Unpaid: 'Invoiced', Invoiced: 'Paid' };
-
   return (
     <div className="stack">
-      <div className="stats">
-        <Stat label="Received" value={money(sum(paid))} tone="green" />
-        <Stat label="Invoiced, waiting" value={money(sum(invoiced))} tone="orange" />
-        <Stat label="Not invoiced yet" value={money(sum(unpaid))} tone="purple" />
-      </div>
+      <Stats
+        stats={[
+          { label: 'Received', value: money(sum(paid)), tone: 'green', hint: plural(paid.length, 'deliverable') },
+          { label: 'Invoiced', value: money(sum(invoiced)), tone: 'amber', hint: 'Waiting to be paid' },
+          { label: 'Not invoiced', value: money(sum(unpaid)), tone: 'accent', hint: plural(unpaid.length, 'deliverable') },
+        ]}
+      />
 
-      <section>
-        <h2 className="section-title">
-          🔔 Posted but not paid <span className="count">{chase.length}</span>
-        </h2>
-        {chase.length === 0 ? (
-          <p className="empty">No one owes you for live posts right now.</p>
-        ) : (
-          <div className="pay-list">
-            {chase.map((it) => (
-              <PayRow key={it.id} it={it} onOpen={onOpen} next={next[it.payment]} onSave={onSave} />
-            ))}
-          </div>
-        )}
-      </section>
+      {withAmount.length === 0 ? (
+        <section className="panel">
+          <EmptyState
+            icon={Wallet}
+            title="No payments to track yet"
+            text="Add an amount to a deliverable and it will appear here."
+          />
+        </section>
+      ) : (
+        <>
+          <section className="panel">
+            <div className="panel-head">
+              <h2>To follow up<span className="sub">Posted or invoiced, not paid yet</span></h2>
+              <span className="count">{chase.length}</span>
+            </div>
+            {chase.length === 0 ? (
+              <EmptyState icon={CircleCheck} tone="green" title="Nothing to chase" text="Every live post has been paid for." />
+            ) : (
+              chase.map((it) => <PayRow key={it.id} it={it} onOpen={onOpen} onSave={onSave} />)
+            )}
+          </section>
 
-      <section>
-        <h2 className="section-title">All deals with an amount <span className="count">{withAmount.length}</span></h2>
-        <div className="pay-list">
-          {withAmount
-            .slice()
-            .sort((a, b) => (b.goLive || '').localeCompare(a.goLive || ''))
-            .map((it) => (
-              <PayRow key={it.id} it={it} onOpen={onOpen} next={next[it.payment]} onSave={onSave} />
-            ))}
-        </div>
-      </section>
+          <section className="panel">
+            <div className="panel-head">
+              <h2>All deals</h2>
+              <span className="count">{withAmount.length}</span>
+            </div>
+            {withAmount
+              .slice()
+              .sort((a, b) => (b.goLive || '').localeCompare(a.goLive || ''))
+              .map((it) => (
+                <PayRow key={it.id} it={it} onOpen={onOpen} onSave={onSave} />
+              ))}
+          </section>
+        </>
+      )}
     </div>
   );
 }
 
-function PayRow({ it, onOpen, next, onSave }) {
+function PayRow({ it, onOpen, onSave }) {
   return (
-    <div className="pay-row">
-      <button className="pay-info" onClick={() => onOpen(it)}>
-        <b>{it.brand}</b>
-        <span className="muted small">
-          {it.type} · {it.status} · {fmtDate(it.goLive)}
+    <div
+      className="pay-row"
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(it)}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && e.key === 'Enter') onOpen(it);
+      }}
+    >
+      <div className="pay-main">
+        <span className="row-brand">{it.brand}</span>
+        <span className="pay-meta">
+          <TypeTag type={it.type} />
+          <span className="pay-sep" />
+          <StageIcon status={it.status} />
+          <span>{isDone(it) ? 'Live' : it.status}</span>
+          {it.goLive && (
+            <>
+              <span className="pay-sep" />
+              <span>{fmtDate(it.goLive)}</span>
+            </>
+          )}
         </span>
-      </button>
+      </div>
       <span className="pay-amt">{money(it.amount)}</span>
-      {next ? (
-        <button
-          className={'pay-state ' + it.payment.toLowerCase()}
-          onClick={() => onSave({ ...it, payment: next }, `Marked ${next}`)}
-          title={`Mark as ${next}`}
-        >
-          {it.payment} → {next}
-        </button>
-      ) : (
-        <span className="pay-state paid">Paid ✓</span>
-      )}
+      <span className="pay-state" onClick={(e) => e.stopPropagation()}>
+        <PaymentMenu it={it} onSave={onSave} />
+      </span>
     </div>
   );
 }
@@ -620,6 +1067,14 @@ function ItemForm({ item, onClose, onSave, onDelete }) {
     setFailed(false);
   }, [item]);
 
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key === 'Escape' && !dirty && !saving) onClose();
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [dirty, saving]);
+
   async function submit(again) {
     if (!brand.trim() || saving) return;
     setSaving(true);
@@ -634,127 +1089,154 @@ function ItemForm({ item, onClose, onSave, onDelete }) {
     if (!dirty && !saving) onClose();
   };
 
+  const safeLink = /^https?:\/\//i.test(f.link || '');
+
   return (
     <div className="overlay" onClick={onBackdrop}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="form-title">
         <div className="sheet-head">
-          <h2>{isNew ? 'New deliverable' : 'Edit deliverable'}</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+          <h2 id="form-title">{isNew ? 'New deliverable' : brand || 'Edit deliverable'}</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <X size={16} strokeWidth={1.75} />
+          </button>
         </div>
 
         <form
           className="form"
+          id="item-form"
           onSubmit={(e) => {
             e.preventDefault();
             submit(false);
           }}
         >
-          <label className="field full">
-            <span>Brand *</span>
-            <input className="input" value={f.brand} onChange={set('brand')} placeholder="e.g. Glow Theory" required autoFocus={isNew && !isTouch} />
+          <label className="field full" htmlFor="f-brand">
+            <span className="field-label">Brand</span>
+            <input id="f-brand" className="input" value={brand} onChange={set('brand')} placeholder="e.g. Glow Theory" required autoFocus={isNew && !isTouch} />
           </label>
 
           <div className="field full">
-            <span>Content type</span>
-            <div className="seg">
+            <span className="field-label">Content type</span>
+            <div className="seg" role="radiogroup" aria-label="Content type">
               {TYPES.map((t) => (
                 <button
                   type="button"
                   key={t}
-                  className={'seg-btn ' + typeClass(t) + (f.type === t ? ' on' : '')}
+                  role="radio"
+                  aria-checked={f.type === t}
+                  className={'seg-btn ' + typeKey(t) + (f.type === t ? ' on' : '')}
                   onClick={() => setF({ ...f, type: t })}
                 >
+                  <i className="type-mark" />
                   {t}
                 </button>
               ))}
             </div>
           </div>
 
-          <label className="field">
-            <span>Draft due to brand</span>
-            <input className="input" type="date" value={f.draftDue} onChange={set('draftDue')} />
+          <label className="field" htmlFor="f-draft">
+            <span className="field-label">Draft due to brand</span>
+            <input id="f-draft" className="input" type="date" value={f.draftDue} onChange={set('draftDue')} />
           </label>
-          <label className="field">
-            <span>Go-live date</span>
-            <input className="input" type="date" value={f.goLive} onChange={set('goLive')} />
+          <label className="field" htmlFor="f-live">
+            <span className="field-label">Go-live date</span>
+            <input id="f-live" className="input" type="date" value={f.goLive} onChange={set('goLive')} />
           </label>
           {datesBackwards && (
-            <p className="warn full">
-              ⚠ Go-live is before the draft due date. Check the dates are the right way round.
+            <p className="hint warn full">
+              <TriangleAlert size={14} strokeWidth={1.75} />
+              Go-live is before the draft due date. Check the dates are the right way round.
             </p>
           )}
 
-          <label className="field">
-            <span>Status</span>
-            <select className="input" value={f.status} onChange={set('status')}>
-              {STATUSES.map((s) => <option key={s}>{s}</option>)}
-            </select>
+          <label className="field" htmlFor="f-status">
+            <span className="field-label">Stage</span>
+            <span className="select">
+              <select id="f-status" className="input" value={f.status} onChange={set('status')}>
+                {STATUSES.map((s) => <option key={s}>{s}</option>)}
+              </select>
+              <ChevronDown size={16} strokeWidth={1.75} />
+            </span>
           </label>
-          <label className="field check">
-            <input type="checkbox" checked={!!f.collab} onChange={set('collab')} />
-            <span>Instagram Collab post</span>
-          </label>
-
-          <label className="field">
-            <span>Amount (₹)</span>
-            <input className="input" type="number" inputMode="numeric" min="0" value={f.amount} onChange={set('amount')} placeholder="0" />
-          </label>
-          <label className="field">
-            <span>Payment</span>
-            <select className="input" value={f.payment} onChange={set('payment')}>
-              {PAYMENTS.map((s) => <option key={s}>{s}</option>)}
-            </select>
+          <label className="field switch-field" htmlFor="f-collab">
+            <span className="field-label">Instagram Collab</span>
+            <span className="switch-row">
+              <input id="f-collab" type="checkbox" className="switch" checked={!!f.collab} onChange={set('collab')} />
+              <span className="switch-text">{f.collab ? 'Posted as a Collab' : 'Not a Collab post'}</span>
+            </span>
           </label>
 
-          <label className="field full">
-            <span>Brand contact</span>
-            <input className="input" value={f.contact} onChange={set('contact')} placeholder="Name, email or @handle" />
+          <div className="form-divider full" />
+
+          <label className="field" htmlFor="f-amount">
+            <span className="field-label">Amount</span>
+            <span className="affix">
+              <span className="affix-sign">₹</span>
+              <input id="f-amount" className="input" type="number" inputMode="numeric" min="0" value={f.amount} onChange={set('amount')} placeholder="0" />
+            </span>
+          </label>
+          <label className="field" htmlFor="f-payment">
+            <span className="field-label">Payment</span>
+            <span className="select">
+              <select id="f-payment" className="input" value={f.payment} onChange={set('payment')}>
+                {PAYMENTS.map((s) => <option key={s}>{s}</option>)}
+              </select>
+              <ChevronDown size={16} strokeWidth={1.75} />
+            </span>
           </label>
 
-          <label className="field full">
-            <span>Post link (once live)</span>
-            <input className="input" type="url" value={f.link} onChange={set('link')} placeholder="https://instagram.com/…" />
+          <label className="field full" htmlFor="f-contact">
+            <span className="field-label">Brand contact</span>
+            <input id="f-contact" className="input" value={f.contact} onChange={set('contact')} placeholder="Name, email or @handle" />
           </label>
 
-          <label className="field full">
-            <span>Notes</span>
-            <textarea className="input" rows="3" value={f.notes} onChange={set('notes')} placeholder="Hashtags, tags, brief, how long it must stay up…" />
+          <label className="field full" htmlFor="f-link">
+            <span className="field-label">
+              Post link
+              {safeLink && (
+                <a className="field-link" href={f.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                  Open post <ExternalLink size={12} strokeWidth={2} />
+                </a>
+              )}
+            </span>
+            <input id="f-link" className="input" type="url" value={f.link} onChange={set('link')} placeholder="Add once the post is live" />
           </label>
 
-          {f.link && (
-            <a className="link-out full" href={f.link} target="_blank" rel="noreferrer">
-              Open post ↗
-            </a>
-          )}
+          <label className="field full" htmlFor="f-notes">
+            <span className="field-label">Notes</span>
+            <textarea id="f-notes" className="input" rows="3" value={f.notes} onChange={set('notes')} placeholder="Hashtags, tags, brief, how long it must stay up" />
+          </label>
 
           {failed && (
-            <p className="warn error full">
-              Not saved yet. Your details are still here. Check your connection and tap Save again.
+            <p className="hint error full">
+              <CircleAlert size={14} strokeWidth={1.75} />
+              Not saved yet. Your details are still here. Check your connection and save again.
             </p>
           )}
-          <div className="form-actions full">
-            {!isNew && (
-              <button
-                type="button"
-                className="btn danger ghost"
-                onClick={() => {
-                  if (confirm(`Delete this ${f.type} for ${brand}?`)) onDelete(f.id);
-                }}
-              >
-                Delete
-              </button>
-            )}
-            <span className="spacer" />
-            {isNew && (
-              <button type="button" className="btn ghost" disabled={saving || !brand.trim()} onClick={() => submit(true)}>
-                Save + add another
-              </button>
-            )}
-            <button type="submit" className="btn primary" disabled={saving || !brand.trim()}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
         </form>
+
+        <div className="sheet-foot">
+          {!isNew && (
+            <button
+              type="button"
+              className="btn ghost danger"
+              onClick={() => {
+                if (confirm(`Delete this ${f.type} for ${brand}?`)) onDelete(f.id);
+              }}
+            >
+              <Trash2 size={16} strokeWidth={1.75} />
+              <span className="label-wide">Delete</span>
+            </button>
+          )}
+          <span className="spacer" />
+          {isNew && (
+            <button type="button" className="btn" disabled={saving || !brand.trim()} onClick={() => submit(true)}>
+              Save and add another
+            </button>
+          )}
+          <button type="submit" form="item-form" className="btn primary" disabled={saving || !brand.trim()}>
+            {saving ? 'Saving…' : isNew ? 'Add deliverable' : 'Save changes'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -768,19 +1250,19 @@ function Settings({ onClose, onChanged }) {
   const current = api.getSettings();
   const [url, setUrl] = useState(current.url || '');
   const [passcode, setPasscode] = useState(current.passcode || '');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState(null); // { tone, text }
   const [busy, setBusy] = useState(false);
 
   async function connect() {
     setBusy(true);
-    setStatus('Connecting…');
+    setStatus({ tone: 'muted', text: 'Connecting…' });
     try {
       const n = await api.testConnection(url.trim(), passcode);
       api.saveSettings({ url: url.trim(), passcode });
-      setStatus(`Connected ✓ Found ${n} deliverable${n === 1 ? '' : 's'}.`);
+      setStatus({ tone: 'green', text: `Connected. Found ${plural(n, 'deliverable')}.` });
       setTimeout(onChanged, 700);
     } catch (e) {
-      setStatus('✗ ' + e.message);
+      setStatus({ tone: 'red', text: e.message });
     } finally {
       setBusy(false);
     }
@@ -788,52 +1270,59 @@ function Settings({ onClose, onChanged }) {
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div className="sheet narrow" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div className="sheet-head">
-          <h2>Connect Google Sheet</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+          <h2 id="settings-title">Google Sheet connection</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <X size={16} strokeWidth={1.75} />
+          </button>
         </div>
         <div className="form">
-          <p className="muted full">
-            Paste the Web app URL from Apps Script (it ends in <code>/exec</code>) and the passcode you set.
-            These are saved on this device only.
+          <p className="form-intro full">
+            Paste the Web app URL from Apps Script (it ends in <code>/exec</code>) and your passcode.
+            They're saved on this device only.
           </p>
-          <label className="field full">
-            <span>Apps Script Web app URL</span>
-            <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec" />
+          <label className="field full" htmlFor="s-url">
+            <span className="field-label">Apps Script Web app URL</span>
+            <input id="s-url" className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec" />
           </label>
-          <label className="field full">
-            <span>Passcode</span>
-            <input className="input" type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)} />
+          <label className="field full" htmlFor="s-pass">
+            <span className="field-label">Passcode</span>
+            <input id="s-pass" className="input" type="password" value={passcode} onChange={(e) => setPasscode(e.target.value)} />
           </label>
-          {status && <p className="full status-line">{status}</p>}
-          <div className="form-actions full">
-            {current.url ? (
-              <button
-                className="btn ghost"
-                onClick={() => {
-                  api.saveSettings({});
-                  onChanged();
-                }}
-              >
-                Disconnect
-              </button>
-            ) : (
-              <button
-                className="btn ghost"
-                onClick={() => {
-                  api.resetDemo();
-                  onChanged();
-                }}
-              >
-                Reset demo data
-              </button>
-            )}
-            <span className="spacer" />
-            <button className="btn primary" disabled={busy || !url.trim()} onClick={connect}>
-              {busy ? 'Connecting…' : 'Connect'}
+          {status && (
+            <p className={'hint full ' + (status.tone === 'red' ? 'error' : status.tone === 'green' ? 'ok' : '')}>
+              {status.tone === 'red' ? <CircleAlert size={14} strokeWidth={1.75} /> : status.tone === 'green' ? <CircleCheck size={14} strokeWidth={1.75} /> : null}
+              {status.text}
+            </p>
+          )}
+        </div>
+        <div className="sheet-foot">
+          {current.url ? (
+            <button
+              className="btn ghost"
+              onClick={() => {
+                api.saveSettings({});
+                onChanged();
+              }}
+            >
+              Disconnect
             </button>
-          </div>
+          ) : (
+            <button
+              className="btn ghost"
+              onClick={() => {
+                api.resetDemo();
+                onChanged();
+              }}
+            >
+              Reset sample data
+            </button>
+          )}
+          <span className="spacer" />
+          <button className="btn primary" disabled={busy || !url.trim()} onClick={connect}>
+            {busy ? 'Connecting…' : 'Connect'}
+          </button>
         </div>
       </div>
     </div>
