@@ -45,7 +45,7 @@ export const diffDays = (a, b) => Math.round((parse(a) - parse(b)) / 86400000);
 
 export function fmtDate(s) {
   if (!s) return '—';
-  if (!isValidDate(s)) return `⚠ ${s}`;
+  if (!isValidDate(s)) return `Check: ${s}`;
   return parse(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
